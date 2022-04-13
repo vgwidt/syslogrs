@@ -20,7 +20,8 @@ fn main() -> Result<(), Error> {
 
     //Enable address reuse and bind to address
     udp4_server_s.set_reuse_address(true)?;
-    //udp4_server_s.set_reuse_port(true)?; //Add for Unix CFG, does not work on Windows
+    #[cfg(unix)]
+    udp4_server_s.set_reuse_port(true)?; //Add for Unix CFG, does not work on Windows
     udp4_server_s.bind(&sa4.into())?;
     let mut udp4_server_mio = UdpSocket::from_std(udp4_server_s.into_udp_socket());
 
