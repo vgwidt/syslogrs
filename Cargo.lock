@@ -56,10 +56,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "socket2"
+version = "0.3.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "122e570113d28d773067fab24266b66753f6ea915758651696b6e35e49f88d6e"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "syslogrs"
 version = "0.1.0"
 dependencies = [
  "mio",
+ "socket2",
 ]
 
 [[package]]
