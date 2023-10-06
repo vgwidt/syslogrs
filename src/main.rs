@@ -36,6 +36,8 @@ struct CurrentFile {
 }
 
 // TODO: use Path for handling paths for safer joining of file names with directories
+// Log files shouldn't contain the date until after they are rotated (this would eliminate need for CurrentFile struct)
+// Logging, rotation, and compression should be made optional
 
 fn main() -> Result<(), Error> {
     //Initialize default config
@@ -203,7 +205,7 @@ fn create_log_file(log_dir: &String, source: &str) -> Result<CurrentFile, Error>
 fn archive_log_file(log_dir: &String, log_file: &str, zip_file: &str) -> Result<(), Error> {
     let log_file_path = format!("{}{}", log_dir, log_file);
 
-    let zip_file_path = format!("{}{}", log_dir, zip_file);
+    let zip_file_path = format!("{}{}.zip", log_dir, zip_file);
 
     println!("Putting log {} into {}", log_file_path, zip_file_path);
 
