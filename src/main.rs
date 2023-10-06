@@ -36,7 +36,6 @@ struct CurrentFile {
 }
 
 // TODO: use Path for handling paths for safer joining of file names with directories
-// Log files shouldn't contain the date until after they are rotated (this would eliminate need for CurrentFile struct)
 // Logging, rotation, and compression should be made optional
 
 fn main() -> Result<(), Error> {
@@ -94,7 +93,12 @@ fn main() -> Result<(), Error> {
                     for (source, log_file) in logs.iter_mut() {
                         let mut new_log_file = create_log_file(&config.log_dir, source).unwrap();
 
-                        let log_file_name = log_file.file_name.to_string();
+                        let current_time = Local::now();
+                        let log_file_name = format!(
+                            "{}_{}",
+                            log_file.file_name.to_string(),
+                            current_time.format("%Y-%m-%d-%H-%M-%S")
+                        );
                         std::mem::swap(log_file, &mut new_log_file);
                         let zip_file_name = format!("{}.zip", log_file_name);
 
@@ -184,27 +188,22 @@ fn receive(
 }
 
 fn create_log_file(log_dir: &String, source: &str) -> Result<CurrentFile, Error> {
-    let current_time = Local::now();
-    let log_file_name = format!(
-        "{}/syslog-{}-{}.log",
-        log_dir,
-        source,
-        current_time.format("%Y-%m-%d-%H-%M-%S")
-    );
-    println!("Log created: {}", log_file_name);
+    let log_file_name = format!("{}/syslog-{}.log", log_dir, source);
 
     match File::create(log_file_name.clone()) {
-        Ok(file) => Ok(CurrentFile {
-            file: file,
-            file_name: log_file_name,
-        }),
+        Ok(file) => {
+            println!("Log created: {}", log_file_name);
+            Ok(CurrentFile {
+                file: file,
+                file_name: log_file_name,
+            })
+        }
         Err(e) => Err(e),
     }
 }
 
 fn archive_log_file(log_dir: &String, log_file: &str, zip_file: &str) -> Result<(), Error> {
     let log_file_path = format!("{}{}", log_dir, log_file);
-
     let zip_file_path = format!("{}{}.zip", log_dir, zip_file);
 
     println!("Putting log {} into {}", log_file_path, zip_file_path);
