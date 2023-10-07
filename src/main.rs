@@ -113,8 +113,7 @@ fn main() -> Result<(), Error> {
 
                                 // Archive the old log file
                                 // Threading would be useful here to free up the writer lock quicker
-                                if let Err(err) = archive_log_file(&config.log_dir, &log_file_name)
-                                {
+                                if let Err(err) = archive_log_file(&log_file_name) {
                                     eprintln!("Error archiving log file: {}", err);
                                 }
                             }
