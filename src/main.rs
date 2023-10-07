@@ -215,8 +215,8 @@ fn create_log_file(log_dir: &String, source: &str) -> Result<CurrentFile, Error>
     }
 }
 
-fn archive_log_file(log_dir: &String, log_file: &str) -> Result<(), Error> {
-    let log_file_path = format!("{}{}", log_dir, log_file);
+fn archive_log_file(log_file: &str) -> Result<(), Error> {
+    let log_file_path = format!("{}", log_file);
     let zip_file_path = format!("{}.zip", log_file_path);
 
     println!("Putting log {} into {}", log_file_path, zip_file_path);
