@@ -90,22 +90,35 @@ fn main() -> Result<(), Error> {
                 if last_rotate_time.elapsed().unwrap().as_secs() >= config.log_rotate_interval {
                     let mut logs = log_writer.lock().unwrap();
 
+                    // Rename log files
                     for (source, log_file) in logs.iter_mut() {
-                        let mut new_log_file = create_log_file(&config.log_dir, source).unwrap();
-
                         let current_time = Local::now();
                         let log_file_name = format!(
-                            "{}_{}",
-                            log_file.file_name.to_string(),
+                            "{}/syslog-{}_{}.log",
+                            config.log_dir,
+                            source,
                             current_time.format("%Y-%m-%d-%H-%M-%S")
                         );
-                        std::mem::swap(log_file, &mut new_log_file);
-                        let zip_file_name = format!("{}.zip", log_file_name);
+                        // Attempt to rename the log, if we succeed we can archive
+                        // If we fail, skip rotation for now
+                        match std::fs::rename(log_file.file_name.clone(), log_file_name.clone()) {
+                            Ok(_) => {
+                                // Create new log file
+                                let mut new_log_file =
+                                    create_log_file(&config.log_dir, source).unwrap();
 
-                        if let Err(err) =
-                            archive_log_file(&config.log_dir, &log_file_name, &zip_file_name)
-                        {
-                            eprintln!("Error archiving log file: {}", err);
+                                // Swap in new file object
+                                // This drops the log file and allows it to be opened by the archiver function
+                                std::mem::swap(log_file, &mut new_log_file);
+
+                                // Archive the old log file
+                                // Threading would be useful here to free up the writer lock quicker
+                                if let Err(err) = archive_log_file(&config.log_dir, &log_file_name)
+                                {
+                                    eprintln!("Error archiving log file: {}", err);
+                                }
+                            }
+                            Err(_) => continue,
                         }
                     }
 
@@ -202,9 +215,9 @@ fn create_log_file(log_dir: &String, source: &str) -> Result<CurrentFile, Error>
     }
 }
 
-fn archive_log_file(log_dir: &String, log_file: &str, zip_file: &str) -> Result<(), Error> {
+fn archive_log_file(log_dir: &String, log_file: &str) -> Result<(), Error> {
     let log_file_path = format!("{}{}", log_dir, log_file);
-    let zip_file_path = format!("{}{}.zip", log_dir, zip_file);
+    let zip_file_path = format!("{}.zip", log_file_path);
 
     println!("Putting log {} into {}", log_file_path, zip_file_path);
 
