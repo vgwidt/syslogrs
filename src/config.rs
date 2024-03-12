@@ -25,7 +25,7 @@ impl Default for Config {
             compress: false,
             port: 514,
             log_rotate_interval: 86400,
-            log_dir: "./logs/".to_string(),
+            log_dir: "./".to_string(),
         }
     }
 }
@@ -40,8 +40,8 @@ pub fn get_config(config_paths: Vec<&str>) -> Result<Config> {
 
     if let Some(path) = config_path {
         let contents = std::fs::read_to_string(path).context("Failed to read config file")?;
-        let data: Data = toml::from_str(&contents)
-            .context(format!("Bad toml data from file: {}", path.to_string()))?;
+        let data: Data =
+            toml::from_str(&contents).context(format!("Bad toml data from file: {}", path))?;
         Ok(data.config)
     } else {
         println!("No config file found, using defaults");

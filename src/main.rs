@@ -6,7 +6,6 @@ use mio::{Events, Interest, Poll, Token};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Read;
 use std::io::{Error, ErrorKind, Write};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -15,8 +14,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime};
 use threadpool::ThreadPool;
-use zip::write::FileOptions;
-use zip::ZipWriter;
 
 mod config;
 
@@ -31,13 +28,11 @@ struct CurrentFile {
 // BUG: It does not rotate what was an active log if the program is closed and re-opened
 
 fn main() -> Result<(), Error> {
-    let mut config_paths = Vec::new();
     #[cfg(target_os = "linux")]
-    config_paths.push("./config.toml");
-    config_paths.push("/etc/syslogrs/config.toml");
+    let config_paths = vec!["./config.toml", "/etc/syslogrs/config.toml"];
 
     #[cfg(target_os = "windows")]
-    config_paths.push("./config.toml");
+    let config_paths = vec!["./config.toml", "/etc/syslogrs/config.toml"];
 
     let config = match get_config(config_paths) {
         Ok(config) => config,
@@ -132,7 +127,7 @@ fn rotate_logs(
     for (source, log_file) in logs.iter_mut() {
         match rename_logs_for_rotation(source, &log_file.file_name, config) {
             Ok(log_file_name) => {
-                let mut new_log_file = create_log_file(&config.log_dir, source, &config).unwrap();
+                let mut new_log_file = create_log_file(&config.log_dir, source, config).unwrap();
                 // Swap in new file object
                 // This drops the log file and allows it to be opened by the archiver function
                 std::mem::swap(log_file, &mut new_log_file);
@@ -152,7 +147,7 @@ fn rotate_logs(
 
 fn rename_logs_for_rotation(
     source: &String,
-    log_file_name: &String,
+    log_file_name: &str,
     config: &Config,
 ) -> Result<String> {
     let current_time = Local::now();
@@ -164,7 +159,7 @@ fn rename_logs_for_rotation(
     );
     // Attempt to rename the log, if we succeed we can archive
     // If we fail, skip rotation for now
-    std::fs::rename(log_file_name.clone(), new_log_file_name.clone())
+    std::fs::rename(log_file_name, new_log_file_name.clone())
         .context("Renaming log on rotation failed")?;
 
     // Create new log file
@@ -209,9 +204,9 @@ fn receive(
                 .lock()
                 .unwrap()
                 .entry(source.to_string())
-                .or_insert_with(|| create_log_file(&config.log_dir, &source, &config).unwrap())
+                .or_insert_with(|| create_log_file(&config.log_dir, &source, config).unwrap())
                 .file
-                .write(format!("{}\n", s.trim()).as_bytes())?;
+                .write_all(format!("{}\n", s.trim()).as_bytes())?;
         }
 
         for elem in buf.iter_mut() {
@@ -238,7 +233,7 @@ fn create_log_file(log_dir: &String, source: &str, config: &Config) -> Result<Cu
         Ok(file) => {
             println!("Log created: {}", log_file_name);
             Ok(CurrentFile {
-                file: file,
+                file,
                 file_name: log_file_name,
             })
         }
@@ -247,20 +242,28 @@ fn create_log_file(log_dir: &String, source: &str, config: &Config) -> Result<Cu
 }
 
 fn archive_log_file(log_file: &str) -> Result<(), Error> {
-    let log_file_path = format!("{}", log_file);
-    let zip_file_path = format!("{}.zip", log_file_path);
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    let log_file_path = log_file.to_string();
+    let gz_file_path = format!("{}.gz", log_file_path);
 
-    println!("Putting log {} into {}", log_file_path, zip_file_path);
+    println!(
+        "Compressing log file {} into {}",
+        log_file_path, gz_file_path
+    );
 
-    let file = File::open(&log_file_path)?;
-    let zip_file = File::create(zip_file_path)?;
-
-    let mut zip_writer = ZipWriter::new(zip_file);
-    let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-
-    zip_writer.start_file("log.txt", options)?;
-
-    std::io::copy(&mut file.take(u64::MAX), &mut zip_writer)?;
+    let mut input = std::io::BufReader::new(File::open(&log_file_path)?);
+    let output = File::create(gz_file_path.clone())?;
+    let mut encoder = GzEncoder::new(output, Compression::default());
+    let start = std::time::Instant::now();
+    std::io::copy(&mut input, &mut encoder).unwrap();
+    let output = encoder.finish().unwrap();
+    println!(
+        "Compression for {} completed in {:?}.  File size: {:?}",
+        gz_file_path,
+        start.elapsed(),
+        output.metadata().unwrap().len()
+    );
 
     //remove old log file
     std::fs::remove_file(std::path::Path::new(log_file_path.as_str()))?;
