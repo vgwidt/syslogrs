@@ -1,4 +1,0 @@
-[config]
-port = 514
-log_rotate_interval = 3600
-log_dir = "./"

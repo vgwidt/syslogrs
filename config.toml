@@ -1,0 +1,13 @@
+[config]
+# pipe logs to stdout (default: true)
+display_stdout = false
+# store logs (default: false)
+store_logs = true
+# compress logs on rotation (default: false)
+compress = true
+# interval in seconds to rotate logs (default: 86400)
+log_rotate_interval = 3600
+# directory to store logs (REQUIRED if store_logs = true)
+log_dir = "./"
+# listening port (default: 514)
+port = 514

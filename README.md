@@ -8,3 +8,6 @@ Build using cargo:
 ```
 cargo build
 ```
+
+# TODO
+* Implement config option to start log rotation interval at a specific time (i.e. 00:00:00).

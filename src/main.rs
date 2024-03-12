@@ -1,7 +1,7 @@
 use chrono::Local;
+use config::{get_config, Config};
 use mio::net::UdpSocket;
 use mio::{Events, Interest, Poll, Token};
-use serde_derive::Deserialize;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::collections::HashMap;
 use std::fs::File;
@@ -16,19 +16,9 @@ use threadpool::ThreadPool;
 use zip::write::FileOptions;
 use zip::ZipWriter;
 
+mod config;
+
 const SERVER: Token = Token(0);
-
-#[derive(Deserialize)]
-struct Data {
-    config: Config,
-}
-
-#[derive(Deserialize, Clone)]
-struct Config {
-    port: u16,
-    log_rotate_interval: u64,
-    log_dir: String,
-}
 
 struct CurrentFile {
     file: File,
@@ -36,23 +26,27 @@ struct CurrentFile {
 }
 
 // TODO: use Path for handling paths for safer joining of file names with directories
-// Logging, rotation, and compression should be made optional
+// BUG: It does not rotate what was an active log if the program is closed and re-opened
 
 fn main() -> Result<(), Error> {
-    //Initialize default config
-    let mut config = Config {
-        port: 514,
-        log_rotate_interval: 3600,
-        log_dir: ".".to_string(),
-    };
-
+    let mut config_paths = Vec::new();
     #[cfg(target_os = "linux")]
-    let config_path = "/etc/syslogrs/config.toml";
+    config_paths.push("./config.toml");
+    config_paths.push("/etc/syslogrs/config.toml");
 
     #[cfg(target_os = "windows")]
-    let config_path = "./config.toml";
+    config_paths.push("./config.toml");
 
-    config = get_config(config_path, config);
+    let config = match get_config(config_paths) {
+        Ok(config) => config,
+        Err(e) => {
+            println!("Error reading config: {:?}", e);
+            println!("Using default config");
+            Config::default()
+        }
+    };
+
+    println!("Using the following config: {:#?}", config);
 
     let mut events = Events::with_capacity(256);
     let mut poll = Poll::new()?;
@@ -113,8 +107,10 @@ fn main() -> Result<(), Error> {
 
                                 // Archive the old log file
                                 // Threading would be useful here to free up the writer lock quicker
-                                if let Err(err) = archive_log_file(&log_file_name) {
-                                    eprintln!("Error archiving log file: {}", err);
+                                if config.compress {
+                                    if let Err(err) = archive_log_file(&log_file_name) {
+                                        eprintln!("Error archiving log file: {}", err);
+                                    }
                                 }
                             }
                             Err(_) => continue,
@@ -178,20 +174,24 @@ fn receive(
             Err(e) => panic!("Not UTF-8: {}", e),
         };
 
-        println!("[{}] {}", from, s);
+        if config.display_stdout {
+            println!("[{}] {}", from, s);
+        }
 
         let source = from.to_string();
         // TODO: regex out IP address
         let source = source.replace(":514", "");
 
         // Send the syslog message to the log manager thread for processing
-        log_writer
-            .lock()
-            .unwrap()
-            .entry(source.to_string())
-            .or_insert_with(|| create_log_file(&config.log_dir, &source).unwrap())
-            .file
-            .write(format!("{}\n", s.trim()).as_bytes())?;
+        if config.store_logs {
+            log_writer
+                .lock()
+                .unwrap()
+                .entry(source.to_string())
+                .or_insert_with(|| create_log_file(&config.log_dir, &source).unwrap())
+                .file
+                .write(format!("{}\n", s.trim()).as_bytes())?;
+        }
 
         for elem in buf.iter_mut() {
             *elem = 0;
@@ -234,24 +234,4 @@ fn archive_log_file(log_file: &str) -> Result<(), Error> {
     std::fs::remove_file(std::path::Path::new(log_file_path.as_str()))?;
 
     Ok(())
-}
-
-fn get_config(config_path: &str, config: Config) -> Config {
-    let contents = match std::fs::read_to_string(config_path) {
-        Ok(c) => c,
-        Err(e) => {
-            println!("Error {} reading config file: {}", e, config_path);
-            return config;
-        }
-    };
-
-    let data: Data = match toml::from_str(&contents) {
-        Ok(d) => d,
-        Err(e) => {
-            println!("Error parsing config, using default. {}", e);
-            return config;
-        }
-    };
-
-    data.config
 }
