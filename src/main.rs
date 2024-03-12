@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use chrono::Local;
 use config::{get_config, Config};
 use mio::net::UdpSocket;
@@ -8,6 +9,7 @@ use std::fs::File;
 use std::io::Read;
 use std::io::{Error, ErrorKind, Write};
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::Path;
 use std::str;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -82,41 +84,12 @@ fn main() -> Result<(), Error> {
             loop {
                 // Check if it's time to rotate the log files
                 if last_rotate_time.elapsed().unwrap().as_secs() >= config.log_rotate_interval {
-                    let mut logs = log_writer.lock().unwrap();
-
-                    // Rename log files
-                    for (source, log_file) in logs.iter_mut() {
-                        let current_time = Local::now();
-                        let log_file_name = format!(
-                            "{}/syslog-{}_{}.log",
-                            config.log_dir,
-                            source,
-                            current_time.format("%Y-%m-%d-%H-%M-%S")
-                        );
-                        // Attempt to rename the log, if we succeed we can archive
-                        // If we fail, skip rotation for now
-                        match std::fs::rename(log_file.file_name.clone(), log_file_name.clone()) {
-                            Ok(_) => {
-                                // Create new log file
-                                let mut new_log_file =
-                                    create_log_file(&config.log_dir, source).unwrap();
-
-                                // Swap in new file object
-                                // This drops the log file and allows it to be opened by the archiver function
-                                std::mem::swap(log_file, &mut new_log_file);
-
-                                // Archive the old log file
-                                // Threading would be useful here to free up the writer lock quicker
-                                if config.compress {
-                                    if let Err(err) = archive_log_file(&log_file_name) {
-                                        eprintln!("Error archiving log file: {}", err);
-                                    }
-                                }
-                            }
-                            Err(_) => continue,
+                    match rotate_logs(&log_writer, &config) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            println!("Encountered error rotating logs: {:?}", e)
                         }
                     }
-
                     last_rotate_time = SystemTime::now();
                 }
                 // Check once per minute
@@ -149,6 +122,55 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 
+fn rotate_logs(
+    log_writer: &Arc<Mutex<HashMap<String, CurrentFile>>>,
+    config: &Config,
+) -> Result<()> {
+    let mut logs = log_writer.lock().unwrap();
+
+    // Rename log files
+    for (source, log_file) in logs.iter_mut() {
+        match rename_logs_for_rotation(source, &log_file.file_name, config) {
+            Ok(log_file_name) => {
+                let mut new_log_file = create_log_file(&config.log_dir, source, &config).unwrap();
+                // Swap in new file object
+                // This drops the log file and allows it to be opened by the archiver function
+                std::mem::swap(log_file, &mut new_log_file);
+                // Archive the old log file
+                // Threading would be useful here to free up the writer lock quicker
+                if config.compress {
+                    archive_log_file(&log_file_name)
+                        .context(format!("Error archiving log file: {}", log_file_name))?;
+                }
+                println!("Rotated log {}", log_file.file_name);
+            }
+            Err(e) => println!("Failed to rotate log {}: {:?}", log_file.file_name, e),
+        }
+    }
+    Ok(())
+}
+
+fn rename_logs_for_rotation(
+    source: &String,
+    log_file_name: &String,
+    config: &Config,
+) -> Result<String> {
+    let current_time = Local::now();
+    let new_log_file_name = format!(
+        "{}/syslog-{}_{}.log",
+        config.log_dir,
+        source,
+        current_time.format("%Y-%m-%d-%H-%M-%S")
+    );
+    // Attempt to rename the log, if we succeed we can archive
+    // If we fail, skip rotation for now
+    std::fs::rename(log_file_name.clone(), new_log_file_name.clone())
+        .context("Renaming log on rotation failed")?;
+
+    // Create new log file
+    Ok(new_log_file_name)
+}
+
 fn receive(
     sock: &UdpSocket,
     buf: &mut [u8],
@@ -178,9 +200,8 @@ fn receive(
             println!("[{}] {}", from, s);
         }
 
-        let source = from.to_string();
-        // TODO: regex out IP address
-        let source = source.replace(":514", "");
+        // Only use IP from source for classification purposes
+        let source = from.ip().to_string();
 
         // Send the syslog message to the log manager thread for processing
         if config.store_logs {
@@ -188,7 +209,7 @@ fn receive(
                 .lock()
                 .unwrap()
                 .entry(source.to_string())
-                .or_insert_with(|| create_log_file(&config.log_dir, &source).unwrap())
+                .or_insert_with(|| create_log_file(&config.log_dir, &source, &config).unwrap())
                 .file
                 .write(format!("{}\n", s.trim()).as_bytes())?;
         }
@@ -199,8 +220,19 @@ fn receive(
     }
 }
 
-fn create_log_file(log_dir: &String, source: &str) -> Result<CurrentFile, Error> {
+fn create_log_file(log_dir: &String, source: &str, config: &Config) -> Result<CurrentFile, Error> {
     let log_file_name = format!("{}/syslog-{}.log", log_dir, source);
+
+    if Path::new(log_file_name.as_str()).exists() {
+        println!("{} already exists.  Attempting rotation", log_file_name);
+        match rename_logs_for_rotation(&source.to_string(), &log_file_name.to_string(), config) {
+            Ok(_) => println!("Succesfully rotated existing log file {}", log_file_name),
+            Err(e) => {
+                //We need to decide what to do here, try a different rename? use same log?
+                println!("Failed to rename log: {:?}", e)
+            }
+        }
+    }
 
     match File::create(log_file_name.clone()) {
         Ok(file) => {
