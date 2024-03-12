@@ -9,7 +9,7 @@ config.toml will be searched for in the following order (for now):
 * `/etc/syslogrs/config.toml`
 
 Sample config with all current available options:
-```
+```toml
 [config]
 # pipe logs to stdout (default: true)
 display_stdout = true
@@ -26,6 +26,7 @@ port = 514
 ```
 
 ## Build
+
 Build using cargo:
 ```
 cargo build
