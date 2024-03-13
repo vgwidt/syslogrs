@@ -35,3 +35,5 @@ cargo build
 ## TODO
 * Implement config option to rotate logs at a specific time (i.e. 00:00:00)
 * Threading and writing needs to be reviewed for performance
+* Add TLS support
+* Support parsing BSD and IETF syslog formats
