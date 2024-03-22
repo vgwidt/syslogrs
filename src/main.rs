@@ -13,7 +13,6 @@ use std::str;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime};
-use threadpool::ThreadPool;
 
 mod config;
 
@@ -25,14 +24,13 @@ struct CurrentFile {
 }
 
 // TODO: use Path for handling paths for safer joining of file names with directories
-// BUG: It does not rotate what was an active log if the program is closed and re-opened
 
 fn main() -> Result<(), Error> {
-    #[cfg(target_os = "linux")]
+    #[cfg(target_family = "unix")]
     let config_paths = vec!["./config.toml", "/etc/syslogrs/config.toml"];
 
-    #[cfg(target_os = "windows")]
-    let config_paths = vec!["./config.toml", "/etc/syslogrs/config.toml"];
+    #[cfg(target_family = "windows")]
+    let config_paths = vec!["./config.toml"];
 
     let config = match get_config(config_paths) {
         Ok(config) => config,
@@ -64,7 +62,7 @@ fn main() -> Result<(), Error> {
     poll.registry()
         .register(&mut udp4_server_mio, SERVER, Interest::READABLE)?;
 
-    let pool = ThreadPool::new(num_cpus::get());
+    //let pool = ThreadPool::new(1);
 
     let source_logs: Arc<Mutex<HashMap<String, CurrentFile>>> =
         Arc::new(Mutex::new(HashMap::new()));
@@ -72,7 +70,7 @@ fn main() -> Result<(), Error> {
     let log_writer = source_logs.clone();
 
     // Create a dedicated thread for log file management
-    {
+    let handle = {
         let config = config.clone();
         thread::spawn(move || {
             let mut last_rotate_time = SystemTime::now();
@@ -87,11 +85,12 @@ fn main() -> Result<(), Error> {
                     }
                     last_rotate_time = SystemTime::now();
                 }
-                // Check once per minute
-                thread::sleep(Duration::from_secs(60));
+                // Check once per second
+                // TODO: This holds up the handle join
+                thread::sleep(Duration::from_secs(1));
             }
-        });
-    }
+        })
+    };
 
     let mut shutdown = false;
     while !shutdown {
@@ -112,7 +111,7 @@ fn main() -> Result<(), Error> {
         }
     }
 
-    pool.join();
+    handle.join().unwrap();
 
     Ok(())
 }
