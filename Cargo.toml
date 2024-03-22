@@ -8,3 +8,9 @@ edition = "2021"
 [dependencies]
 mio = { version = "0.8.8", features = ["net", "os-poll"] }
 socket2 = "0.5.4"
+chrono = "0.4.31"
+toml = "0.8.2"
+serde = "1.0.188"
+serde_derive = "1.0.188"
+anyhow = "1.0.80"
+flate2 = "1.0"
