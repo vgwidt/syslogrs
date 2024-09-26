@@ -33,6 +33,7 @@ cargo build
 ```
 
 ## TODO
+* After rotation, do not create new log until syslog is received (terminate thread?)
 * Implement config option to rotate logs at a specific time (i.e. 00:00:00)
 * Threading and writing needs to be reviewed for performance
 * Add TLS support
